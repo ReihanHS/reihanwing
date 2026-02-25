@@ -1,0 +1,12 @@
+# System Files
+.DS_Store
+Thumbs.db
+
+# Brain/Session Data
+.gemini/
+brain/
+
+# Potential Build Artifacts
+node_modules/
+dist/
+build/

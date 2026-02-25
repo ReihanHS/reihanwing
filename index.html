@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ReihanWing Mobile</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div id="game-container">
+        <!-- UI Overlay -->
+        <div id="ui-layer">
+            <div id="score-container">
+                <div id="score">SCORE: 0</div>
+                <div id="attack-power">POW: 10</div>
+                <div id="high-score">HIGH: 0</div>
+            </div>
+            <div id="health-bar-container">
+                <div id="health-bar"></div>
+            </div>
+        </div>
+
+        <!-- Boss Warning Overlay -->
+        <div id="boss-warning" class="boss-warning-overlay">
+            <div class="warning-alert">WARNING</div>
+            <div id="boss-name" class="boss-title">BOSS APPROACHING</div>
+        </div>
+
+        <!-- Game World -->
+        <div id="game-world">
+            <div id="player" class="neon-entity">
+                <div class="shield-aura"></div>
+                <div class="magnet-aura"></div>
+            </div>
+        </div>
+
+        <!-- Screens -->
+        <div id="menu-screen" class="screen active">
+            <h1 class="neon-text">REIHAN<span class="highlight">WING</span></h1>
+            <button id="start-button">START MISSION</button>
+        </div>
+
+        <div id="game-over-screen" class="screen">
+            <h1 class="neon-text">MISSION <span class="failed">FAILED</span></h1>
+            <div id="final-score">SCORE: 0</div>
+            <button id="restart-button">RETRY</button>
+        </div>
+    </div>
+    <script src="game.js"></script>
+</body>
+
+</html>
