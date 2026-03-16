@@ -17,9 +17,16 @@
                 <div id="attack-power">POW: 10</div>
                 <div id="high-score">HIGH: 0</div>
             </div>
+            <button id="pause-button">⏸</button>
             <div id="health-bar-container">
                 <div id="health-bar"></div>
             </div>
+        </div>
+
+        <!-- Pause Menu Overlay -->
+        <div id="pause-menu" class="screen">
+            <h1 class="neon-text">PAUSED</h1>
+            <button id="resume-button">RESUME</button>
         </div>
 
         <!-- Boss Warning Overlay -->
@@ -27,6 +34,9 @@
             <div class="warning-alert">WARNING</div>
             <div id="boss-name" class="boss-title">BOSS APPROACHING</div>
         </div>
+
+        <!-- Star Canvas (replaces 50 DOM star divs) -->
+        <canvas id="star-canvas"></canvas>
 
         <!-- Game World -->
         <div id="game-world">

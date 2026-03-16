@@ -1,40 +1,43 @@
 /**
- * ReihanWing Mobile - Core Game Engine
+ * ReihanWing Mobile - Core Game Engine (Mobile Optimized)
  */
 
 const gameConfig = {
-    playerSize: 60, // Larger like EverWing
+    playerSize: 60,
     bulletSpeed: 14,
     enemySpeed: 3,
     spawnRate: 1500,
-    maxBullets: 40,
-    maxEnemies: 30,
-    fireRate: 150, // ms
-    enemySize: 60, // Larger base size
-    starCount: 50,
-    bossInterval: 500, // score threshold
+    maxBullets: 20,          // ↓ was 40
+    maxEnemies: 15,          // ↓ was 30
+    fireRate: 150,
+    enemySize: 60,
+    starCount: 30,           // ↓ was 50
+    bossInterval: 500,
     powerUpChance: 0.15,
-    powerUpDuration: 5000, // 5 seconds
+    powerUpDuration: 5000,
     powerUpSpeed: 8,
     bulletWidth: 10,
     bulletHeight: 25,
-    bossAttackRate: 2000, // ms
+    bossAttackRate: 2000,
     bossWarningDuration: 5000,
     bossGracePeriod: 3000,
     coinSpeed: 8,
     gemValue: 50,
     gemChance: 0.1,
-    magnetRange: 350, // Increased for major WOW factor
+    magnetRange: 350,
     magnetDuration: 8000
 };
 
 const gameState = {
     isRunning: false,
+    isPaused: false,
+    pauseStartTime: 0,
+    totalPausedTime: 0,
     score: 0,
     highScore: parseInt(localStorage.getItem('reihanwing_mobile_highscore')) || 0,
     attackPower: 10,
     health: 100,
-    playerPosition: { x: window.innerWidth / 2, y: window.innerHeight - 100 },
+    playerPosition: { x: 0, y: 0 },
     touchX: 0,
     touchY: 0,
     lastFireTime: 0,
@@ -85,90 +88,140 @@ const gameWorld = document.getElementById('game-world');
 const attackPowerEl = document.getElementById('attack-power');
 const bossWarningEl = document.getElementById('boss-warning');
 const bossNameEl = document.getElementById('boss-name');
+const pauseButton = document.getElementById('pause-button');
+const resumeButton = document.getElementById('resume-button');
+const pauseMenu = document.getElementById('pause-menu');
+const starCanvas = document.getElementById('star-canvas');
+const starCtx = starCanvas.getContext('2d');
+
+// Cached container dimensions — avoids layout reads inside the game loop
+let containerW = 0;
+let containerH = 0;
+
+function cacheContainerSize() {
+    containerW = gameContainer.offsetWidth;
+    containerH = gameContainer.offsetHeight;
+    starCanvas.width = containerW;
+    starCanvas.height = containerH;
+}
 
 // Initialization
 function init() {
+    cacheContainerSize();
+    window.addEventListener('resize', cacheContainerSize);
+
     highScoreEl.textContent = `HIGH: ${gameState.highScore}`;
     attackPowerEl.textContent = `POW: ${gameState.attackPower}`;
-    createStarField();
+    initStarField();
     setupControls();
+
+    gameState.playerPosition.x = containerW / 2;
+    gameState.playerPosition.y = containerH - 100;
     updatePlayerPosition();
 
     startButton.addEventListener('click', startGame);
     restartButton.addEventListener('click', startGame);
+    pauseButton.addEventListener('click', togglePause);
+    resumeButton.addEventListener('click', togglePause);
 
-    // Initial static loop for stars
     requestAnimationFrame(backgroundLoop);
 }
 
-function createStarField() {
-    const starField = document.createElement('div');
-    starField.id = 'star-field';
-    gameContainer.insertBefore(starField, gameWorld);
-
+// Canvas-based star field — replaces 50 individual DOM elements
+function initStarField() {
+    gameState.stars = [];
     for (let i = 0; i < gameConfig.starCount; i++) {
-        const star = document.createElement('div');
-        star.className = 'star';
-        const size = Math.random() * 3 + 1;
-        star.style.width = `${size}px`;
-        star.style.height = `${size}px`;
-
-        const x = Math.random() * gameContainer.offsetWidth;
-        const y = Math.random() * gameContainer.offsetHeight;
-        const speed = Math.random() * 2 + 1;
-
-        star.style.transform = `translate(${x}px, ${y}px)`;
-        starField.appendChild(star);
-        gameState.stars.push({ el: star, x, y, speed });
+        gameState.stars.push({
+            x: Math.random() * containerW,
+            y: Math.random() * containerH,
+            size: Math.random() * 2 + 0.5,
+            speed: Math.random() * 2 + 1,
+            opacity: Math.random() * 0.5 + 0.3
+        });
     }
 }
 
+function drawStars(speedMult = 1) {
+    starCtx.clearRect(0, 0, containerW, containerH);
+    for (const star of gameState.stars) {
+        star.y += star.speed * speedMult;
+        if (star.y > containerH) {
+            star.y = -4;
+            star.x = Math.random() * containerW;
+        }
+        starCtx.globalAlpha = star.opacity;
+        starCtx.fillStyle = 'white';
+        starCtx.beginPath();
+        starCtx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+        starCtx.fill();
+    }
+    starCtx.globalAlpha = 1;
+}
+
 function setupControls() {
-    // Touch movement
+    // passive: true lets browser optimize — we don't call preventDefault here
     gameContainer.addEventListener('touchstart', (e) => {
         if (!gameState.isRunning) return;
         const touch = e.touches[0];
         gameState.touchX = touch.clientX;
         gameState.touchY = touch.clientY;
-    });
+    }, { passive: true });
 
     gameContainer.addEventListener('touchmove', (e) => {
         if (!gameState.isRunning) return;
-        e.preventDefault(); // Prevent scrolling
+        e.preventDefault();
         const touch = e.touches[0];
 
-        // Calculate new position based on touch drag (X and Y)
         const deltaX = touch.clientX - gameState.touchX;
         const deltaY = touch.clientY - gameState.touchY;
-
         gameState.touchX = touch.clientX;
         gameState.touchY = touch.clientY;
 
         gameState.playerPosition.x += deltaX;
         gameState.playerPosition.y += deltaY;
 
-        // Constrain to bounds
-        const containerWidth = gameContainer.offsetWidth;
-        const containerHeight = gameContainer.offsetHeight;
-        const halfWidth = gameConfig.playerSize / 2;
-        const halfHeight = gameConfig.playerSize / 2;
-
-        if (gameState.playerPosition.x < halfWidth) gameState.playerPosition.x = halfWidth;
-        if (gameState.playerPosition.x > containerWidth - halfWidth) gameState.playerPosition.x = containerWidth - halfWidth;
-
-        if (gameState.playerPosition.y < halfHeight) gameState.playerPosition.y = halfHeight;
-        if (gameState.playerPosition.y > containerHeight - halfHeight) gameState.playerPosition.y = containerHeight - halfHeight;
+        // Use cached dimensions — no offsetWidth/Height call
+        const halfSize = gameConfig.playerSize / 2;
+        gameState.playerPosition.x = Math.max(halfSize, Math.min(containerW - halfSize, gameState.playerPosition.x));
+        gameState.playerPosition.y = Math.max(halfSize, Math.min(containerH - halfSize, gameState.playerPosition.y));
 
         updatePlayerPosition();
     }, { passive: false });
 
-    // Mouse fallback for testing (2D)
-    gameContainer.addEventListener('mousemove', (e) => {
-        if (!gameState.isRunning) return;
-        const rect = gameContainer.getBoundingClientRect();
-        gameState.playerPosition.x = e.clientX - rect.left;
-        gameState.playerPosition.y = e.clientY - rect.top;
+    let isMouseDown = false;
+    let lastMouseX = 0;
+    let lastMouseY = 0;
+
+    gameContainer.addEventListener('mousedown', (e) => {
+        if (!gameState.isRunning || gameState.isPaused) return;
+        isMouseDown = true;
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+        gameContainer.style.cursor = 'grabbing';
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!gameState.isRunning || !isMouseDown) return;
+
+        const sensitivity = 2.0;
+        const deltaX = (e.clientX - lastMouseX) * sensitivity;
+        const deltaY = (e.clientY - lastMouseY) * sensitivity;
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+
+        gameState.playerPosition.x += deltaX;
+        gameState.playerPosition.y += deltaY;
+
+        const halfSize = gameConfig.playerSize / 2;
+        gameState.playerPosition.x = Math.max(halfSize, Math.min(containerW - halfSize, gameState.playerPosition.x));
+        gameState.playerPosition.y = Math.max(halfSize, Math.min(containerH - halfSize, gameState.playerPosition.y));
+
         updatePlayerPosition();
+    });
+
+    document.addEventListener('mouseup', () => {
+        isMouseDown = false;
+        gameContainer.style.cursor = 'crosshair';
     });
 }
 
@@ -178,6 +231,8 @@ function updatePlayerPosition() {
 
 function startGame() {
     gameState.isRunning = true;
+    gameState.isPaused = false;
+    gameState.totalPausedTime = 0;
     gameState.score = 0;
     gameState.health = 100;
     gameState.attackPower = 10;
@@ -188,7 +243,6 @@ function startGame() {
     bossWarningEl.classList.remove('active');
     playerEl.classList.remove('shielded', 'magnetized');
 
-    // Clear previous entities
     gameState.bullets.forEach(b => b.el.remove());
     gameState.enemies.forEach(e => e.el.remove());
     if (gameState.boss) {
@@ -218,12 +272,12 @@ function endGame() {
         localStorage.setItem('reihanwing_mobile_highscore', gameState.highScore);
         highScoreEl.textContent = `HIGH: ${gameState.highScore}`;
     }
-
     finalScoreEl.textContent = `SCORE: ${gameState.score}`;
     gameOverScreen.classList.add('active');
 }
 
 function spawnBullet(xOffset = 0) {
+    if (gameState.bullets.length >= gameConfig.maxBullets) return;
     let bullet;
     if (gameState.pools.bullets.length > 0) {
         bullet = gameState.pools.bullets.pop();
@@ -240,7 +294,6 @@ function spawnBullet(xOffset = 0) {
 
     const x = gameState.playerPosition.x + xOffset;
     const y = gameState.playerPosition.y - 20;
-
     bullet.style.transform = `translate(${x}px, ${y}px) translateX(-50%)`;
     gameState.bullets.push({ el: bullet, x, y });
 }
@@ -256,13 +309,12 @@ function spawnPowerUp(x, y) {
     } else {
         puEl = document.createElement('div');
         puEl.className = 'powerup neon-entity';
-        puEl.style.width = '40px'; // Larger powerups
+        puEl.style.width = '40px';
         puEl.style.height = '40px';
         gameWorld.appendChild(puEl);
     }
 
-    // Color coding and Symbols
-    puEl.innerHTML = ''; // Clear previous symbol if any
+    puEl.innerHTML = '';
     const symbol = document.createElement('div');
     symbol.style.color = 'white';
     symbol.style.fontSize = '24px';
@@ -287,7 +339,6 @@ function spawnPowerUp(x, y) {
     }
 
     puEl.appendChild(symbol);
-
     puEl.style.transform = `translate(${x}px, ${y}px) translateX(-50%)`;
     gameState.powerUps.push({ el: puEl, x, y, type });
 }
@@ -295,20 +346,20 @@ function spawnPowerUp(x, y) {
 function spawnEnemyRow() {
     if (gameState.boss) return;
 
-    const rowCount = 5; // EverWing uses 5
-    const gap = 4; // Slightly larger gap for bigger enemies
-    const containerWidth = gameWorld.offsetWidth || 500;
-
-    // Dynamically calculate enemy size to fill the entire row
-    const enemySize = (containerWidth - (gap * (rowCount - 1))) / rowCount;
+    const rowCount = 5;
+    const gap = 4;
+    const cW = containerW || gameWorld.offsetWidth || 500;
+    const enemySize = (cW - (gap * (rowCount - 1))) / rowCount;
 
     for (let i = 0; i < rowCount; i++) {
+        if (gameState.enemies.length >= gameConfig.maxEnemies) break;
+
         const hp = Math.floor(10 * gameState.difficultyScale);
         let enemy, visual, hpBarContainer, hpBarFill;
 
         if (gameState.pools.enemies.length > 0) {
             enemy = gameState.pools.enemies.pop();
-            enemy.style.display = 'flex'; // Use flex for HP bar positioning
+            enemy.style.display = 'flex';
             visual = enemy.querySelector('.enemy-visual');
             hpBarFill = enemy.querySelector('.hp-bar-fill');
             hpBarFill.style.width = '100%';
@@ -331,43 +382,39 @@ function spawnEnemyRow() {
             gameWorld.appendChild(enemy);
         }
 
-        // Apply dynamic size
         enemy.style.width = `${enemySize}px`;
         enemy.style.height = `${enemySize}px`;
 
-        // Calculate center of each slot (Total width Divided by 5)
-        const x = (i * containerWidth / rowCount) + (containerWidth / rowCount / 2);
+        const x = (i * cW / rowCount) + (cW / rowCount / 2);
         const y = -enemySize;
-
         enemy.style.transform = `translate(${x}px, ${y}px) translateX(-50%)`;
+
         gameState.enemies.push({
             el: enemy,
             hpBarEl: hpBarFill,
             maxHp: hp,
             x,
             y,
-            hp: hp
+            hp,
+            size: enemySize,   // FIX: was never stored — caused NaN in hitTest
+            flashUntil: 0      // FIX: replaces setTimeout for hit flash
         });
     }
 }
 
 function spawnBoss() {
     gameState.isBossWarning = true;
-
-    // Stop spawning enemies and show warning
     bossWarningEl.classList.add('active');
 
     const name = gameState.bossNames[Math.floor(Math.random() * gameState.bossNames.length)];
     bossNameEl.textContent = name;
 
-    // Higher duration for more impact
     setTimeout(() => {
         if (!gameState.isRunning) return;
 
         bossWarningEl.classList.remove('active');
         gameState.isBossWarning = false;
 
-        // Clear existing regular enemies for the duel
         gameState.enemies.forEach(e => {
             e.el.style.display = 'none';
             gameState.pools.enemies.push(e.el);
@@ -398,9 +445,8 @@ function spawnBoss() {
             color = '#ff4d00';
         }
 
-        const x = gameWorld.offsetWidth / 2;
+        const x = containerW / 2;
         const y = -bossSize;
-
         boss.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
         gameWorld.appendChild(boss);
 
@@ -416,7 +462,7 @@ function spawnBoss() {
             color: color,
             lastAttackTime: 0,
             attackRateScale: Math.max(0.4, 1.0 - (gameState.difficultyScale - 1) * 0.2),
-            movePhase: 0 // For wavy or dash patterns
+            movePhase: 0
         };
     }, gameConfig.bossWarningDuration);
 }
@@ -481,9 +527,8 @@ function spawnCoin(x, y, vx = 0, vy = gameConfig.coinSpeed) {
         el.className = 'coin neon-entity';
         gameWorld.appendChild(el);
     }
-
-    el.style.left = `${x}px`;
-    el.style.top = `${y}px`;
+    // Use transform (not left/top) to avoid layout triggers
+    el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
     gameState.coins.push({ el, x, y, vx, vy });
 }
 
@@ -497,15 +542,14 @@ function spawnGem(x, y, vx = 0, vy = gameConfig.coinSpeed * 0.8) {
         el.className = 'gem neon-entity';
         gameWorld.appendChild(el);
     }
-
-    el.style.left = `${x}px`;
-    el.style.top = `${y}px`;
+    // Use transform (not left/top) to avoid layout triggers
+    el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
     gameState.gems.push({ el, x, y, vx, vy });
 }
 
-
 function createExplosion(x, y, color) {
-    for (let i = 0; i < 8; i++) {
+    const count = 5; // Reduced from 8 — meaningful perf win on mobile
+    for (let i = 0; i < count; i++) {
         let p;
         if (gameState.pools.particles.length > 0) {
             p = gameState.pools.particles.pop();
@@ -526,69 +570,68 @@ function createExplosion(x, y, color) {
         const speed = Math.random() * 4 + 2;
         const vx = Math.cos(angle) * speed;
         const vy = Math.sin(angle) * speed;
-
         p.style.transform = `translate(${x}px, ${y}px)`;
 
-        gameState.particles.push({
-            el: p,
-            x: x,
-            y: y,
-            vx: vx,
-            vy: vy,
-            life: 1.0,
-            decay: Math.random() * 0.05 + 0.015
-        });
+        gameState.particles.push({ el: p, x, y, vx, vy, life: 1.0, decay: Math.random() * 0.05 + 0.015 });
     }
 }
 
 function backgroundLoop() {
-    // Stars move regardless of game state
-    for (const star of gameState.stars) {
-        star.y += star.speed;
-        if (star.y > gameContainer.offsetHeight) {
-            star.y = -10;
-            star.x = Math.random() * gameContainer.offsetWidth;
-        }
-        star.el.style.transform = `translate(${star.x}px, ${star.y}px)`;
-    }
-
+    drawStars(1);
     if (!gameState.isRunning) {
         requestAnimationFrame(backgroundLoop);
     }
 }
 
-function checkCollision(rect1, rect2) {
-    return !(rect1.right < rect2.left ||
-        rect1.left > rect2.right ||
-        rect1.bottom < rect2.top ||
-        rect1.top > rect2.bottom);
+function togglePause() {
+    if (!gameState.isRunning) return;
+
+    gameState.isPaused = !gameState.isPaused;
+    if (gameState.isPaused) {
+        gameState.pauseStartTime = performance.now();
+        pauseMenu.classList.add('active');
+    } else {
+        gameState.totalPausedTime += performance.now() - gameState.pauseStartTime;
+        pauseMenu.classList.remove('active');
+        requestAnimationFrame(gameLoop);
+    }
+}
+
+// Pure math collision — zero layout reads, zero reflow
+function hitTest(x1, y1, r1, x2, y2, r2) {
+    const dx = x1 - x2;
+    const dy = y1 - y2;
+    const minDist = r1 + r2;
+    return (dx * dx + dy * dy) < (minDist * minDist);
 }
 
 function gameLoop(timestamp) {
-    if (!gameState.isRunning) return;
+    if (!gameState.isRunning || gameState.isPaused) return;
+
+    const gameTime = timestamp - gameState.totalPausedTime;
+
+    // Cache bounds once per frame — no repeated layout reads in entity loops
+    const cW = containerW;
+    const cH = containerH;
+    const pX = gameState.playerPosition.x;
+    const pY = gameState.playerPosition.y;
+    const pR = gameConfig.playerSize / 2;
 
     // Power-up expiration
     for (const key in gameState.activePowerUps) {
-        if (gameState.activePowerUps[key] > 0 && timestamp > gameState.activePowerUps[key]) {
+        if (gameState.activePowerUps[key] > 0 && gameTime > gameState.activePowerUps[key]) {
             gameState.activePowerUps[key] = 0;
             if (key === 'shield') playerEl.classList.remove('shielded');
             if (key === 'magnet') playerEl.classList.remove('magnetized');
         }
     }
 
-    // Background stars
+    // Stars drawn to canvas — no DOM manipulation
     const starSpeedMult = gameState.activePowerUps.rush ? 5 : 1;
-    for (const star of gameState.stars) {
-        star.y += star.speed * starSpeedMult;
-        if (star.y > gameContainer.offsetHeight) {
-            star.y = -10;
-            star.x = Math.random() * gameContainer.offsetWidth;
-        }
-        star.el.style.transform = `translate(${star.x}px, ${star.y}px)`;
-    }
+    drawStars(starSpeedMult);
 
     // Shooting logic
-    if (timestamp - gameState.lastFireTime > gameConfig.fireRate) {
+    if (gameTime - gameState.lastFireTime > gameConfig.fireRate) {
         if (gameState.activePowerUps.tripleShot) {
             spawnBullet(0);
             spawnBullet(-15);
@@ -596,14 +639,14 @@ function gameLoop(timestamp) {
         } else {
             spawnBullet(0);
         }
-        gameState.lastFireTime = timestamp;
+        gameState.lastFireTime = gameTime;
     }
 
     // Spawning logic (with Boss and Grace Period checks)
-    const isGracePeriod = timestamp < gameState.bossDefeatTime + gameConfig.bossGracePeriod;
-    if (!gameState.boss && !gameState.isBossWarning && !isGracePeriod && timestamp - gameState.lastSpawnTime > (gameConfig.spawnRate / gameState.difficultyScale)) {
+    const isGracePeriod = gameTime < gameState.bossDefeatTime + gameConfig.bossGracePeriod;
+    if (!gameState.boss && !gameState.isBossWarning && !isGracePeriod && gameTime - gameState.lastSpawnTime > (gameConfig.spawnRate / gameState.difficultyScale)) {
         spawnEnemyRow();
-        gameState.lastSpawnTime = timestamp;
+        gameState.lastSpawnTime = gameTime;
     }
 
     // Boss spawning trigger
@@ -615,10 +658,9 @@ function gameLoop(timestamp) {
     // Difficulty scaling
     gameState.difficultyScale = 1.0 + (gameState.score / 2000);
 
-    // Update Boss
+    // ── Update Boss ──────────────────────────────────────────────────────────
     if (gameState.boss) {
         const b = gameState.boss;
-        const timeFactor = timestamp / 1000;
 
         // Entry movement
         if (b.y < b.targetY) {
@@ -626,40 +668,23 @@ function gameLoop(timestamp) {
         } else {
             // Unique Movement Patterns
             if (b.name === "ELDER PENTAGUARD") {
-                // Steady Oscillation
                 b.x += b.vx;
-                if (b.x < b.size / 2 || b.x > gameWorld.offsetWidth - b.size / 2) {
-                    b.vx *= -1;
-                }
+                if (b.x < b.size / 2 || b.x > cW - b.size / 2) b.vx *= -1;
             } else if (b.name === "NEON SERPENT") {
-                // Sinuous Wave
                 b.movePhase += 0.05;
-                b.x = (gameWorld.offsetWidth / 2) + Math.sin(b.movePhase) * (gameWorld.offsetWidth * 0.4);
+                b.x = (cW / 2) + Math.sin(b.movePhase) * (cW * 0.4);
                 b.y = b.targetY + Math.cos(b.movePhase * 2) * 20;
             } else if (b.name === "VOID REAPER") {
-                // Dash and Pause
                 b.movePhase += 0.02;
-                if (Math.sin(b.movePhase) > 0.8) {
-                    // Dash
-                    b.x += b.vx * 3;
-                } else {
-                    // Slow Float
-                    b.x += b.vx * 0.5;
-                }
-                if (b.x < b.size / 2 || b.x > gameWorld.offsetWidth - b.size / 2) {
-                    b.vx *= -1;
-                }
+                b.x += Math.sin(b.movePhase) > 0.8 ? b.vx * 3 : b.vx * 0.5;
+                if (b.x < b.size / 2 || b.x > cW - b.size / 2) b.vx *= -1;
             } else if (b.name === "CYBER HIVE") {
-                // Erratic Jitter
                 b.x += (Math.random() - 0.5) * 10 + b.vx;
                 b.y = b.targetY + (Math.random() - 0.5) * 5;
-                if (b.x < b.size / 2 || b.x > gameWorld.offsetWidth - b.size / 2) {
-                    b.vx *= -1;
-                }
+                if (b.x < b.size / 2 || b.x > cW - b.size / 2) b.vx *= -1;
             } else if (b.name === "STALKER PRIME") {
-                // Pursuer: Tracks player slowly in both X and Y
-                const dx = gameState.playerPosition.x - b.x;
-                const dy = gameState.playerPosition.y - b.y;
+                const dx = pX - b.x;
+                const dy = pY - b.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
                 if (dist > 5) {
                     b.x += (dx / dist) * (1.5 * gameState.difficultyScale);
@@ -669,22 +694,20 @@ function gameLoop(timestamp) {
         }
         b.el.style.transform = `translate(${b.x}px, ${b.y}px) translate(-50%, -50%)`;
 
-        // Contact Damage logic
-        const bossRect = b.el.getBoundingClientRect();
-        const pRect = playerEl.getBoundingClientRect();
-        if (checkCollision(bossRect, pRect)) {
+        // Contact damage — hitTest only, no getBoundingClientRect
+        if (hitTest(b.x, b.y, b.size / 2, pX, pY, pR)) {
             if (!gameState.activePowerUps.shield) {
-                gameState.health -= 0.5; // Constant damage while touching
+                gameState.health -= 0.5;
                 healthBarEl.style.width = `${Math.max(0, gameState.health)}%`;
-                if (Math.random() > 0.9) createExplosion(gameState.playerPosition.x, gameState.playerPosition.y, b.color);
+                if (Math.random() > 0.9) createExplosion(pX, pY, b.color);
                 if (gameState.health <= 0) endGame();
             }
         }
 
-        // Boss Bullet collision
+        // Boss vs player bullets — hitTest only, no getBoundingClientRect
         for (let j = gameState.bullets.length - 1; j >= 0; j--) {
             const bul = gameState.bullets[j];
-            if (checkCollision(bul.el.getBoundingClientRect(), bossRect)) {
+            if (hitTest(bul.x, bul.y, 4, b.x, b.y, b.size / 2)) {
                 b.health--;
                 createExplosion(bul.x, bul.y, 'var(--neon-purple)');
 
@@ -695,29 +718,24 @@ function gameLoop(timestamp) {
                 if (b.health <= 0) {
                     createExplosion(b.x, b.y, 'var(--neon-purple)');
 
-                    // Clear boss projectiles for safe reward collection
                     gameState.bossBullets.forEach(bb => {
                         bb.el.style.display = 'none';
                         gameState.pools.bossBullets.push(bb.el);
                     });
                     gameState.bossBullets = [];
 
-                    // Fountain of coins and gems!
                     for (let c = 0; c < 25; c++) {
                         const angle = Math.random() * Math.PI * 2;
                         const speed = Math.random() * 8 + 4;
                         const vx = Math.cos(angle) * speed;
                         const vy = Math.sin(angle) * speed;
-                        if (c < 5) {
-                            spawnGem(b.x, b.y, vx, vy);
-                        } else {
-                            spawnCoin(b.x, b.y, vx, vy);
-                        }
+                        if (c < 5) { spawnGem(b.x, b.y, vx, vy); }
+                        else { spawnCoin(b.x, b.y, vx, vy); }
                     }
 
-                    b.el.remove(); // Boss is unique, no pool
+                    b.el.remove();
                     gameState.boss = null;
-                    gameState.bossDefeatTime = timestamp;
+                    gameState.bossDefeatTime = gameTime;
                     break;
                 }
             }
@@ -725,104 +743,84 @@ function gameLoop(timestamp) {
     }
 
     // Update Boss Attacks
-    bossAttack(timestamp);
+    bossAttack(gameTime);
 
-    // Update Boss Bullets
-    const pRect = playerEl.getBoundingClientRect();
+    // ── Update Boss Bullets ──────────────────────────────────────────────────
     for (let i = gameState.bossBullets.length - 1; i >= 0; i--) {
         const bb = gameState.bossBullets[i];
         bb.x += bb.vx;
         bb.y += bb.vy;
         bb.el.style.transform = `translate(${bb.x}px, ${bb.y}px) translateX(-50%)`;
 
-        const bbRect = bb.el.getBoundingClientRect();
-
-        // Collision with player
-        if (checkCollision(bbRect, pRect)) {
+        if (hitTest(bb.x, bb.y, 6, pX, pY, pR)) {
             if (!gameState.activePowerUps.shield) {
                 gameState.health -= 20;
                 healthBarEl.style.width = `${Math.max(0, gameState.health)}%`;
-                createExplosion(gameState.playerPosition.x, gameState.playerPosition.y, 'var(--neon-cyan)');
+                createExplosion(pX, pY, 'var(--neon-cyan)');
                 if (gameState.health <= 0) endGame();
             }
-
             bb.el.style.display = 'none';
             gameState.pools.bossBullets.push(bb.el);
             gameState.bossBullets.splice(i, 1);
             continue;
         }
 
-        // Out of bounds
-        if (bb.y > window.innerHeight + 20 || bb.y < -50 || bb.x < -20 || bb.x > window.innerWidth + 20) {
+        if (bb.y > cH + 20 || bb.y < -50 || bb.x < -20 || bb.x > cW + 20) {
             bb.el.style.display = 'none';
             gameState.pools.bossBullets.push(bb.el);
             gameState.bossBullets.splice(i, 1);
         }
     }
 
-    // Update Coins
+    // ── Update Coins ─────────────────────────────────────────────────────────
     for (let i = gameState.coins.length - 1; i >= 0; i--) {
         const c = gameState.coins[i];
 
-        // Magnet effect
         if (gameState.activePowerUps.magnet) {
-            const dx = gameState.playerPosition.x - c.x;
-            const dy = gameState.playerPosition.y - c.y;
+            const dx = pX - c.x;
+            const dy = pY - c.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
-
             if (dist < gameConfig.magnetRange) {
                 const pullForce = (gameConfig.magnetRange - dist) / gameConfig.magnetRange;
-                c.vx += (dx / dist) * pullForce * 2.5; // Boosted pull
+                c.vx += (dx / dist) * pullForce * 2.5;
                 c.vy += (dy / dist) * pullForce * 2.5;
             }
         }
 
-        // Apply movement
         c.x += c.vx;
         c.y += c.vy;
 
-        // Physics damping
         if (!gameState.activePowerUps.magnet) {
-            c.vx *= 0.95; // Gradually stop horizontal movement
+            c.vx *= 0.95;
             if (Math.abs(c.vx) < 0.1) c.vx = 0;
-
-            // Settle into constant vertical drop
-            if (c.vy < gameConfig.coinSpeed) {
-                c.vy += 0.2; // Gravity-like acceleration until terminal speed
-            } else {
-                c.vy = gameConfig.coinSpeed;
-            }
+            if (c.vy < gameConfig.coinSpeed) { c.vy += 0.2; }
+            else { c.vy = gameConfig.coinSpeed; }
         } else {
-            // Magnet pull
             c.vx *= 0.95;
             c.vy *= 0.95;
             if (Math.abs(c.vy) < gameConfig.coinSpeed) c.vy = gameConfig.coinSpeed;
         }
 
-        c.el.style.left = `${c.x}px`;
-        c.el.style.top = `${c.y}px`;
+        // transform instead of left/top — no layout trigger
+        c.el.style.transform = `translate(${c.x}px, ${c.y}px) translate(-50%, -50%)`;
 
-        // Collection
-        const rect = c.el.getBoundingClientRect();
-        if (checkCollision(rect, pRect)) {
+        if (hitTest(c.x, c.y, 8, pX, pY, pR)) {
             gameState.score += 5;
             scoreEl.textContent = `SCORE: ${gameState.score}`;
-
             c.el.style.display = 'none';
             gameState.pools.coins.push(c.el);
             gameState.coins.splice(i, 1);
             continue;
         }
 
-        // Out of bounds
-        if (c.y > window.innerHeight + 50) {
+        if (c.y > cH + 50) {
             c.el.style.display = 'none';
             gameState.pools.coins.push(c.el);
             gameState.coins.splice(i, 1);
         }
     }
 
-    // Update particles
+    // ── Update Particles ──────────────────────────────────────────────────────
     for (let i = gameState.particles.length - 1; i >= 0; i--) {
         const p = gameState.particles[i];
         p.x += p.vx;
@@ -839,16 +837,14 @@ function gameLoop(timestamp) {
         }
     }
 
-    // Update Gems
+    // ── Update Gems ───────────────────────────────────────────────────────────
     for (let i = gameState.gems.length - 1; i >= 0; i--) {
         const g = gameState.gems[i];
 
-        // Magnet effect
         if (gameState.activePowerUps.magnet) {
-            const dx = gameState.playerPosition.x - g.x;
-            const dy = gameState.playerPosition.y - g.y;
+            const dx = pX - g.x;
+            const dy = pY - g.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
-
             if (dist < gameConfig.magnetRange) {
                 const pullForce = (gameConfig.magnetRange - dist) / gameConfig.magnetRange;
                 g.vx += (dx / dist) * pullForce * 2.0;
@@ -858,56 +854,47 @@ function gameLoop(timestamp) {
 
         g.x += g.vx;
         g.y += g.vy;
-        g.vy += 0.08; // Slightly less gravity than coins
+        g.vy += 0.08;
         g.vx *= 0.98;
 
-        const rect = g.el.getBoundingClientRect();
-        const playerRect = playerEl.getBoundingClientRect();
-
-        if (checkCollision(rect, playerRect)) {
+        if (hitTest(g.x, g.y, 10, pX, pY, pR)) {
             gameState.score += gameConfig.gemValue;
             scoreEl.textContent = `SCORE: ${gameState.score}`;
-
-            createExplosion(g.x, g.y, 'var(--neon-cyan)', 5);
-
+            createExplosion(g.x, g.y, '#00ffcc');
             g.el.style.display = 'none';
             gameState.pools.gems.push(g.el);
             gameState.gems.splice(i, 1);
             continue;
         }
 
-        if (g.y > window.innerHeight + 50) {
+        if (g.y > cH + 50) {
             g.el.style.display = 'none';
             gameState.pools.gems.push(g.el);
             gameState.gems.splice(i, 1);
             continue;
         }
 
-        g.el.style.left = `${g.x}px`;
-        g.el.style.top = `${g.y}px`;
+        // transform instead of left/top — no layout trigger
+        g.el.style.transform = `translate(${g.x}px, ${g.y}px) translate(-50%, -50%)`;
     }
 
-    // Update power-ups
+    // ── Update Power-Ups ──────────────────────────────────────────────────────
     for (let i = gameState.powerUps.length - 1; i >= 0; i--) {
         const pu = gameState.powerUps[i];
-        pu.y += gameConfig.powerUpSpeed; // Faster fall
+        pu.y += gameConfig.powerUpSpeed;
         pu.el.style.transform = `translate(${pu.x}px, ${pu.y}px) translateX(-50%)`;
 
-        const rect = pu.el.getBoundingClientRect();
-        const playerRect = playerEl.getBoundingClientRect();
-
-        if (checkCollision(rect, playerRect)) {
+        if (hitTest(pu.x, pu.y, 20, pX, pY, pR)) {
             if (pu.type === 'damageUpgrade') {
                 gameState.attackPower += 5;
                 attackPowerEl.textContent = `POW: ${gameState.attackPower}`;
-                // Double pulse effect on UI
                 attackPowerEl.animate([
                     { transform: 'scale(1)', filter: 'brightness(1)' },
                     { transform: 'scale(1.5)', filter: 'brightness(2)' },
                     { transform: 'scale(1)', filter: 'brightness(1)' }
                 ], { duration: 500 });
             } else {
-                gameState.activePowerUps[pu.type] = timestamp + (pu.type === 'magnet' ? gameConfig.magnetDuration : gameConfig.powerUpDuration);
+                gameState.activePowerUps[pu.type] = gameTime + (pu.type === 'magnet' ? gameConfig.magnetDuration : gameConfig.powerUpDuration);
                 if (pu.type === 'shield') playerEl.classList.add('shielded');
                 if (pu.type === 'magnet') playerEl.classList.add('magnetized');
             }
@@ -918,14 +905,14 @@ function gameLoop(timestamp) {
             continue;
         }
 
-        if (pu.y > window.innerHeight + 50) {
+        if (pu.y > cH + 50) {
             pu.el.style.display = 'none';
             gameState.pools.powerUps.push(pu.el);
             gameState.powerUps.splice(i, 1);
         }
     }
 
-    // Update bullets
+    // ── Update Bullets ────────────────────────────────────────────────────────
     for (let i = gameState.bullets.length - 1; i >= 0; i--) {
         const b = gameState.bullets[i];
         b.y -= gameConfig.bulletSpeed;
@@ -938,26 +925,27 @@ function gameLoop(timestamp) {
         }
     }
 
-    // Update enemies
-    const playerRect = playerEl.getBoundingClientRect();
+    // ── Update Enemies ────────────────────────────────────────────────────────
     for (let i = gameState.enemies.length - 1; i >= 0; i--) {
         const e = gameState.enemies[i];
         const eSpeed = gameState.activePowerUps.rush ? 10 : (gameConfig.enemySpeed * gameState.difficultyScale);
         e.y += eSpeed;
         e.el.style.transform = `translate(${e.x}px, ${e.y}px) translateX(-50%)`;
 
-        const enemyRect = e.el.getBoundingClientRect();
+        // Resolve hit flash with timestamp — no setTimeout
+        if (e.flashUntil > 0 && gameTime >= e.flashUntil) {
+            e.flashUntil = 0;
+            if (e.el.style.display !== 'none') {
+                e.el.style.filter = 'drop-shadow(0 0 8px var(--neon-red))';
+            }
+        }
 
         // Player collision
-        if (checkCollision(playerRect, enemyRect)) {
+        if (hitTest(e.x, e.y, e.size / 2, pX, pY, pR)) {
             if (gameState.activePowerUps.rush) {
-                // Rush destroys enemies
                 createExplosion(e.x, e.y, 'var(--neon-red)');
-                if (Math.random() < gameConfig.gemChance) {
-                    spawnGem(e.x, e.y);
-                } else {
-                    for (let c = 0; c < 3; c++) spawnCoin(e.x, e.y);
-                }
+                if (Math.random() < gameConfig.gemChance) { spawnGem(e.x, e.y); }
+                else { for (let c = 0; c < 3; c++) spawnCoin(e.x, e.y); }
                 createExplosion(e.x, e.y, 'var(--neon-red)');
                 e.el.style.display = 'none';
                 gameState.pools.enemies.push(e.el);
@@ -966,7 +954,6 @@ function gameLoop(timestamp) {
             }
 
             if (gameState.activePowerUps.shield) {
-                // Shield protects player
                 createExplosion(e.x, e.y, 'var(--neon-red)');
                 e.el.style.display = 'none';
                 gameState.pools.enemies.push(e.el);
@@ -976,10 +963,8 @@ function gameLoop(timestamp) {
 
             gameState.health -= 15;
             healthBarEl.style.width = `${Math.max(0, gameState.health)}%`;
-
             createExplosion(e.x, e.y, 'var(--neon-red)');
-            createExplosion(gameState.playerPosition.x, gameState.playerPosition.y, 'var(--neon-cyan)');
-
+            createExplosion(pX, pY, 'var(--neon-cyan)');
             e.el.style.display = 'none';
             gameState.pools.enemies.push(e.el);
             gameState.enemies.splice(i, 1);
@@ -990,18 +975,16 @@ function gameLoop(timestamp) {
         // Bullet collision
         for (let j = gameState.bullets.length - 1; j >= 0; j--) {
             const b = gameState.bullets[j];
-            const bulletRect = b.el.getBoundingClientRect();
 
-            if (checkCollision(bulletRect, enemyRect)) {
+            if (hitTest(b.x, b.y, 4, e.x, e.y, e.size / 2)) {
                 e.hp -= gameState.attackPower;
 
-                // Update HP bar visual & color
                 const hpPercent = Math.max(0, (e.hp / e.maxHp) * 100);
                 e.hpBarEl.style.width = `${hpPercent}%`;
 
-                if (hpPercent > 60) e.hpBarEl.style.background = '#33ff33'; // Green
-                else if (hpPercent > 30) e.hpBarEl.style.background = '#ffff33'; // Yellow
-                else e.hpBarEl.style.background = '#ff3333'; // Red
+                if (hpPercent > 60) e.hpBarEl.style.background = '#33ff33';
+                else if (hpPercent > 30) e.hpBarEl.style.background = '#ffff33';
+                else e.hpBarEl.style.background = '#ff3333';
 
                 if (e.hp <= 0) {
                     if (Math.random() < gameConfig.gemChance) {
@@ -1012,7 +995,6 @@ function gameLoop(timestamp) {
                     }
                     createExplosion(e.x, e.y, 'var(--neon-red)');
 
-                    // Spawn power-up chance
                     if (Math.random() < gameConfig.powerUpChance) {
                         spawnPowerUp(e.x, e.y);
                     }
@@ -1021,13 +1003,9 @@ function gameLoop(timestamp) {
                     gameState.pools.enemies.push(e.el);
                     gameState.enemies.splice(i, 1);
                 } else {
-                    // Flash enemy on hit
+                    // Timestamp-based flash — no setTimeout garbage collection
                     e.el.style.filter = 'brightness(3) drop-shadow(0 0 15px white)';
-                    setTimeout(() => {
-                        if (e.el.style.display !== 'none') {
-                            e.el.style.filter = 'drop-shadow(0 0 8px var(--neon-red))';
-                        }
-                    }, 50);
+                    e.flashUntil = gameTime + 50;
                 }
 
                 b.el.style.display = 'none';
@@ -1037,7 +1015,7 @@ function gameLoop(timestamp) {
             }
         }
 
-        if (e.y > window.innerHeight + 50) {
+        if (e.y > cH + 50) {
             e.el.style.display = 'none';
             gameState.pools.enemies.push(e.el);
             gameState.enemies.splice(i, 1);
