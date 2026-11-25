@@ -1,5 +1,9 @@
 # ReihanWing 🚀👾
 
+**Play it:** https://reihanhs.github.io/reihanwing/
+
+![Screenshot of ReihanWing](docs/screenshot.webp)
+
 A high-intensity, retro-cyberpunk arcade shooter inspired by EverWing, built with HTML5, CSS3, and Vanilla JavaScript.
 
 ## Features
