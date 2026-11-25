@@ -14,6 +14,3 @@ A high-intensity, retro-cyberpunk arcade shooter inspired by EverWing, built wit
 - **Drag/Move**: Control your ship to dodge enemies and bullets while collecting loot.
 - **Shooting**: Your ship fires automatically.
 - **Goal**: Survive as long as possible, defeat bosses, and climb the high score leaderboard!
-
----
-Built with ❤️ by Antigravity AI.
